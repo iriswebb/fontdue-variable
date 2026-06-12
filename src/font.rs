@@ -6,6 +6,7 @@ use crate::table::{load_gsub, TableKern};
 use crate::unicode;
 use crate::FontResult;
 use crate::{HashMap, HashSet};
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::*;
@@ -199,7 +200,7 @@ impl Default for FontSettings {
 /// Represents a font. Fonts are immutable after creation and owns its own copy of the font data.
 #[derive(Clone)]
 pub struct Font<'a> {
-    face: Face<'a>,
+    face: Box<Face<'a>>,
     name: Option<String>,
     units_per_em: f32,
     char_to_glyph: HashMap<char, NonZeroU16>,
@@ -273,9 +274,10 @@ impl<'a> Font<'a> {
     /// Constructs a font from an array of bytes.
     pub fn from_bytes(data: &'a [u8], settings: FontSettings) -> FontResult<Font<'a>> {
         let hash = crate::hash::hash(data);
+        use alloc::boxed::Box;
 
         let mut face = match Face::parse(&data, settings.collection_index) {
-            Ok(f) => f,
+            Ok(f) => Box::new(f),
             Err(e) => return Err(convert_error(e)),
         };
         let name = convert_name(&face);
