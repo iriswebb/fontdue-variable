@@ -202,7 +202,6 @@ pub struct Font<'a> {
     face: Face<'a>,
     name: Option<String>,
     units_per_em: f32,
-    glyphs: Vec<Glyph>,
     char_to_glyph: HashMap<char, NonZeroU16>,
     horizontal_line_metrics: Option<LineMetrics>,
     horizontal_kern: Option<HashMap<u32, i16>>,
@@ -251,6 +250,26 @@ fn convert_name(face: &Face) -> Option<String> {
 }
 
 impl<'a> Font<'a> {
+    fn generate_glyph(&self, index: u16) -> Result<Glyph, &'static str> {
+        if index >= self.face.number_of_glyphs() {
+            return Err("Attempted to map a codepoint out of bounds.");
+        }
+
+        let mut glyph = Glyph::default();
+        let glyph_id = GlyphId(index);
+        if let Some(advance_width) = self.face.glyph_hor_advance(glyph_id) {
+            glyph.advance_width = advance_width as f32;
+        }
+        if let Some(advance_height) = self.face.glyph_ver_advance(glyph_id) {
+            glyph.advance_height = advance_height as f32;
+        }
+
+        let mut geometry = Geometry::new(self.settings.scale, self.face.units_per_em() as f32);
+        self.face.outline_glyph(glyph_id, &mut geometry);
+        geometry.finalize(&mut glyph);
+        Ok(glyph)
+    }
+
     /// Constructs a font from an array of bytes.
     pub fn from_bytes(data: &'a [u8], settings: FontSettings) -> FontResult<Font<'a>> {
         let hash = crate::hash::hash(data);
@@ -298,45 +317,6 @@ impl<'a> Font<'a> {
 
         let units_per_em = face.units_per_em() as f32;
 
-        // Parse and store all unique codepoints.
-        let mut glyphs: Vec<Glyph> = vec::from_elem(Glyph::default(), glyph_count as usize);
-
-        let generate_glyph = |index: u16| -> Result<Glyph, &'static str> {
-            if index >= glyph_count {
-                return Err("Attempted to map a codepoint out of bounds.");
-            }
-
-            let mut glyph = Glyph::default();
-            let glyph_id = GlyphId(index);
-            if let Some(advance_width) = face.glyph_hor_advance(glyph_id) {
-                glyph.advance_width = advance_width as f32;
-            }
-            if let Some(advance_height) = face.glyph_ver_advance(glyph_id) {
-                glyph.advance_height = advance_height as f32;
-            }
-
-            let mut geometry = Geometry::new(settings.scale, units_per_em);
-            face.outline_glyph(glyph_id, &mut geometry);
-            geometry.finalize(&mut glyph);
-            Ok(glyph)
-        };
-
-        #[cfg(not(feature = "parallel"))]
-        for index in indices_to_load {
-            glyphs[index as usize] = generate_glyph(index)?;
-        }
-
-        #[cfg(feature = "parallel")]
-        {
-            let generated: Vec<(u16, Glyph)> = indices_to_load
-                .into_par_iter()
-                .map(|index| Ok((index, generate_glyph(index)?)))
-                .collect::<Result<_, _>>()?;
-            for (index, glyph) in generated {
-                glyphs[index as usize] = glyph;
-            }
-        }
-
         // New line metrics.
         let horizontal_line_metrics =
             Some(LineMetrics::new(face.ascender(), face.descender(), face.line_gap()));
@@ -353,7 +333,6 @@ impl<'a> Font<'a> {
         Ok(Font {
             name,
             face,
-            glyphs,
             char_to_glyph,
             units_per_em,
             horizontal_line_metrics,
@@ -481,9 +460,9 @@ impl<'a> Font<'a> {
     ///
     /// * `Metrics` - Sizing and positioning metadata for the glyph.
     pub fn metrics_indexed(&self, index: u16, px: f32) -> Metrics {
-        let glyph = &self.glyphs[index as usize];
+        let glyph = self.generate_glyph(index).expect("Invalid Index");
         let scale = self.scale_factor(px);
-        let (metrics, _, _) = self.metrics_raw(scale, glyph, 0.0);
+        let (metrics, _, _) = self.metrics_raw(scale, &glyph, 0.0);
         metrics
     }
 
@@ -605,7 +584,7 @@ impl<'a> Font<'a> {
         if px <= 0.0 {
             return (Metrics::default(), Vec::new());
         }
-        let glyph = &self.glyphs[index as usize];
+        let glyph = &self.generate_glyph(index).expect("Invalid Index");
         let scale = self.scale_factor(px);
         let (metrics, offset_x, offset_y) = self.metrics_raw(scale, glyph, 0.0);
         let mut canvas = Raster::new(metrics.width, metrics.height);
@@ -633,7 +612,7 @@ impl<'a> Font<'a> {
         if px <= 0.0 {
             return (Metrics::default(), Vec::new());
         }
-        let glyph = &self.glyphs[index as usize];
+        let glyph = &self.generate_glyph(index).expect("Invalid Index");
         let scale = self.scale_factor(px);
         let (metrics, offset_x, offset_y) = self.metrics_raw(scale, glyph, 0.0);
         let mut canvas = Raster::new(metrics.width * 3, metrics.height);
@@ -657,6 +636,6 @@ impl<'a> Font<'a> {
 
     /// Gets the total glyphs in the font.
     pub fn glyph_count(&self) -> u16 {
-        self.glyphs.len() as u16
+        self.face.number_of_glyphs()
     }
 }
