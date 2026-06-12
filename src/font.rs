@@ -198,7 +198,8 @@ impl Default for FontSettings {
 
 /// Represents a font. Fonts are immutable after creation and owns its own copy of the font data.
 #[derive(Clone)]
-pub struct Font {
+pub struct Font<'a> {
+    face: Face<'a>,
     name: Option<String>,
     units_per_em: f32,
     glyphs: Vec<Glyph>,
@@ -210,13 +211,13 @@ pub struct Font {
     hash: usize,
 }
 
-impl Hash for Font {
+impl<'a> Hash for Font<'a> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.hash.hash(state);
     }
 }
 
-impl core::fmt::Debug for Font {
+impl<'a> core::fmt::Debug for Font<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Font")
             .field("name", &self.name)
@@ -249,10 +250,10 @@ fn convert_name(face: &Face) -> Option<String> {
     None
 }
 
-impl Font {
+impl<'a> Font<'a> {
     /// Constructs a font from an array of bytes.
-    pub fn from_bytes<Data: Deref<Target = [u8]>>(data: Data, settings: FontSettings) -> FontResult<Font> {
-        let hash = crate::hash::hash(&data);
+    pub fn from_bytes(data: &'a [u8], settings: FontSettings) -> FontResult<Font<'a>> {
+        let hash = crate::hash::hash(data);
 
         let mut face = match Face::parse(&data, settings.collection_index) {
             Ok(f) => f,
@@ -351,6 +352,7 @@ impl Font {
 
         Ok(Font {
             name,
+            face,
             glyphs,
             char_to_glyph,
             units_per_em,
