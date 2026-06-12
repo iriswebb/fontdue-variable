@@ -157,7 +157,7 @@ impl Default for Glyph {
 }
 
 /// Settings for controlling specific font and layout behavior.
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct FontSettings {
     /// The default is 0. The index of the font to use if parsing a font collection.
     pub collection_index: u32,
@@ -172,6 +172,17 @@ pub struct FontSettings {
     /// i.e. `Font::raserize_indexed`, as singular characters do not have enough context to be
     /// substituted.
     pub load_substitutions: bool,
+    /// The default is None, assuming that the font is not variable. If enabled, this will set the
+    /// variation of the font with [`ttf_parser::Face::set_set_variation`] before further rendering.
+    ///
+    /// Example:
+    ///
+    /// ```rust
+    /// use ttf_parser::{Variation, Tag};
+    ///
+    /// Variation { axis: Tag::from_bytes(b"wght"), value: 500.0 };
+    /// ```
+    pub variation: Vec<ttf_parser::Variation>,
 }
 
 impl Default for FontSettings {
@@ -180,6 +191,7 @@ impl Default for FontSettings {
             collection_index: 0,
             scale: 40.0,
             load_substitutions: true,
+            variation: Vec::new(),
         }
     }
 }
@@ -242,11 +254,16 @@ impl Font {
     pub fn from_bytes<Data: Deref<Target = [u8]>>(data: Data, settings: FontSettings) -> FontResult<Font> {
         let hash = crate::hash::hash(&data);
 
-        let face = match Face::parse(&data, settings.collection_index) {
+        let mut face = match Face::parse(&data, settings.collection_index) {
             Ok(f) => f,
             Err(e) => return Err(convert_error(e)),
         };
         let name = convert_name(&face);
+
+        // Set the variation of the font
+        for var in settings.variation.clone() {
+            face.set_variation(var.axis, var.value);
+        }
 
         // Optionally get kerning values for the font. This should be a try block in the future.
         let horizontal_kern: Option<HashMap<u32, i16>> = (|| {
