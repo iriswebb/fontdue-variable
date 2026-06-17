@@ -22,13 +22,13 @@ pub fn decode_utf16(bytes: &[u8]) -> String {
 pub fn read_utf16(bytes: &[u8], offset: &mut usize) -> char {
     let a = ((bytes[*offset] as u16) << 8) | bytes[*offset + 1] as u16;
     *offset += 2;
-    if a < 0xD800 || 0xDFFF < a {
+    if !(0xD800..=0xDFFF).contains(&a) {
         unsafe { core::char::from_u32_unchecked(a as u32) }
     } else {
         let b = ((bytes[*offset] as u16) << 8) | bytes[*offset + 1] as u16;
         *offset += 2;
         let c = (((a - 0xD800) as u32) << 10 | (b - 0xDC00) as u32) + 0x1_0000;
-        unsafe { core::char::from_u32_unchecked(c as u32) }
+        unsafe { core::char::from_u32_unchecked(c) }
     }
 }
 
@@ -68,7 +68,6 @@ pub const LINEBREAK_SOFT: LinebreakData = LinebreakData::new(0b0000_0001);
 pub const LINEBREAK_HARD: LinebreakData = LinebreakData::new(0b0000_0010);
 
 impl LinebreakData {
-    const NONE: u8 = 0b0000_0000;
     const SOFT: u8 = 0b0000_0001;
     const HARD: u8 = 0b0000_0010;
 
@@ -93,10 +92,6 @@ impl LinebreakData {
 
     pub fn is_hard(&self) -> bool {
         self.bits == LinebreakData::HARD
-    }
-
-    pub fn is_soft(&self) -> bool {
-        self.bits == LinebreakData::SOFT
     }
 
     pub fn mask(&self, other: LinebreakData) -> LinebreakData {

@@ -2,12 +2,10 @@ pub use crate::unicode::CharacterData;
 
 use crate::unicode::{read_utf8, LinebreakData, Linebreaker, LINEBREAK_NONE};
 use crate::Font;
-use crate::{
-    platform::{ceil, floor},
-    Metrics,
-};
+use crate::Metrics;
 use alloc::vec::*;
 use core::borrow::Borrow;
+use core::f32::math::*;
 use core::hash::{Hash, Hasher};
 
 /// Horizontal alignment options for text when a max_width is provided.
@@ -423,7 +421,7 @@ impl<'a, U: Copy + Clone> Layout<U> {
             return;
         }
 
-        let font: &Font = &fonts[style.font_index].borrow();
+        let font: &Font = fonts[style.font_index].borrow();
 
         if let Some(metrics) = font.horizontal_line_metrics(style.px) {
             self.current_ascent = ceil(metrics.ascent);
@@ -498,7 +496,7 @@ impl<'a, U: Copy + Clone> Layout<U> {
 
             self.glyphs.push(GlyphPosition {
                 key: GlyphRasterConfig {
-                    glyph_index: glyph_index as u16,
+                    glyph_index,
                     px: style.px,
                     font_hash: font.file_hash(),
                 },

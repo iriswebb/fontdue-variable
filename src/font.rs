@@ -1,23 +1,14 @@
 use crate::layout::GlyphRasterConfig;
 use crate::math::{Geometry, Line};
-use crate::platform::{as_i32, ceil, floor, fract, is_negative};
 use crate::raster::Raster;
-use crate::table::{load_gsub, TableKern};
 use crate::unicode;
 use crate::FontResult;
-use crate::{HashMap, HashSet};
-use alloc::boxed::Box;
 use alloc::string::String;
-use alloc::vec;
+use alloc::sync::Arc;
 use alloc::vec::*;
+use core::f32::math::*;
 use core::hash::{Hash, Hasher};
-use core::mem;
-use core::num::NonZeroU16;
-use core::ops::Deref;
-use ttf_parser::{Face, FaceParsingError, GlyphId, Tag};
-
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
+use ttf_parser::{Face, FaceParsingError, GlyphId};
 
 /// Defines the bounds for a glyph's outline in subpixels. A glyph's outline is always contained in
 /// its bitmap.
@@ -200,31 +191,21 @@ impl Default for FontSettings {
 /// Represents a font. Fonts are immutable after creation and owns its own copy of the font data.
 #[derive(Clone)]
 pub struct Font<'a> {
-    face: Box<Face<'a>>,
-    name: Option<String>,
-    units_per_em: f32,
-    char_to_glyph: HashMap<char, NonZeroU16>,
+    pub face: Arc<Face<'a>>,
     horizontal_line_metrics: Option<LineMetrics>,
-    horizontal_kern: Option<HashMap<u32, i16>>,
     vertical_line_metrics: Option<LineMetrics>,
-    settings: FontSettings,
-    hash: usize,
+    scale: f32,
 }
 
 impl<'a> Hash for Font<'a> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.hash.hash(state);
+        self.file_hash().hash(state);
     }
 }
 
 impl<'a> core::fmt::Debug for Font<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Font")
-            .field("name", &self.name)
-            .field("settings", &self.settings)
-            .field("units_per_em", &self.units_per_em)
-            .field("hash", &self.hash)
-            .finish()
+        f.debug_struct("Font").finish()
     }
 }
 
@@ -239,15 +220,6 @@ fn convert_error(error: FaceParsingError) -> &'static str {
         NoHheaTable => "The hhea table is missing or malformed.",
         NoMaxpTable => "The maxp table is missing or malformed.",
     }
-}
-
-fn convert_name(face: &Face) -> Option<String> {
-    for name in face.names() {
-        if name.name_id == 4 && name.is_unicode() {
-            return Some(unicode::decode_utf16(name.name));
-        }
-    }
-    None
 }
 
 impl<'a> Font<'a> {
@@ -265,102 +237,94 @@ impl<'a> Font<'a> {
             glyph.advance_height = advance_height as f32;
         }
 
-        let mut geometry = Geometry::new(self.settings.scale, self.face.units_per_em() as f32);
+        let mut geometry = Geometry::new(self.scale, self.face.units_per_em() as f32);
         self.face.outline_glyph(glyph_id, &mut geometry);
         geometry.finalize(&mut glyph);
         Ok(glyph)
     }
 
+    fn char_to_glyph_id(&self, codepoint: char) -> Option<u16> {
+        self.face.glyph_index(codepoint).map(|id| id.0)
+    }
+
+    /// Constructs a font from a ttf_parser Face
+    ///
+    /// Note: This ignores variations in the font settings, please set variations with Face::set_variation
+    pub fn from_face(face: Arc<Face<'a>>, settings: FontSettings) -> FontResult<Font<'a>> {
+        // New line metrics.
+        let horizontal_line_metrics =
+            Some(LineMetrics::new(face.ascender(), face.descender(), face.line_gap()));
+        let vertical_line_metrics = face.vertical_ascender().map(|ascender| {
+            LineMetrics::new(
+                ascender,
+                face.vertical_descender().unwrap_or(0),
+                face.vertical_line_gap().unwrap_or(0),
+            )
+        });
+
+        Ok(Font {
+            face,
+            horizontal_line_metrics,
+            vertical_line_metrics,
+            scale: settings.scale,
+        })
+    }
+
+    fn get_kern_value(&self, left_glyph: u16, right_glyph: u16) -> Option<i16> {
+        let kern = self.face.tables().kern?;
+
+        // Iterate through all kern subtables
+        Some(
+            kern.subtables
+                .into_iter()
+                .filter(|subtable| {
+                    // Only use horizontal, non-state-machine subtables
+                    subtable.horizontal && !subtable.has_cross_stream && !subtable.has_state_machine
+                })
+                .filter_map(|subtable| subtable.glyphs_kerning(GlyphId(left_glyph), GlyphId(right_glyph)))
+                .sum(),
+        ) // Sum values from all matching subtables
+    }
+
     /// Constructs a font from an array of bytes.
     pub fn from_bytes(data: &'a [u8], settings: FontSettings) -> FontResult<Font<'a>> {
-        let hash = crate::hash::hash(data);
-        use alloc::boxed::Box;
-
-        let mut face = match Face::parse(&data, settings.collection_index) {
-            Ok(f) => Box::new(f),
+        let mut face = match Face::parse(data, settings.collection_index) {
+            Ok(f) => f,
             Err(e) => return Err(convert_error(e)),
         };
-        let name = convert_name(&face);
 
-        // Set the variation of the font
         for var in settings.variation.clone() {
             face.set_variation(var.axis, var.value);
         }
 
-        // Optionally get kerning values for the font. This should be a try block in the future.
-        let horizontal_kern: Option<HashMap<u32, i16>> = (|| {
-            let table: &[u8] = face.raw_face().table(Tag::from_bytes(&b"kern"))?;
-            let table: TableKern = TableKern::new(table)?;
-            Some(table.horizontal_mappings)
-        })();
+        Self::from_face(Arc::new(face), settings)
+    }
 
-        // Collect all the unique codepoint to glyph mappings.
-        let glyph_count = face.number_of_glyphs();
-        let mut indices_to_load = HashSet::with_capacity(glyph_count as usize);
-        let mut char_to_glyph = HashMap::with_capacity(glyph_count as usize);
-        indices_to_load.insert(0u16);
-        if let Some(subtable) = face.tables().cmap {
-            for subtable in subtable.subtables {
-                subtable.codepoints(|codepoint| {
-                    if let Some(mapping) = subtable.glyph_index(codepoint) {
-                        if let Some(mapping) = NonZeroU16::new(mapping.0) {
-                            indices_to_load.insert(mapping.get());
-                            char_to_glyph.insert(unsafe { mem::transmute::<u32, char>(codepoint) }, mapping);
-                        }
-                    }
-                })
-            }
+    /// Returns the font's face name at a certain ID if it has one.
+    /// See https://learn.microsoft.com/en-us/typography/opentype/spec/name#name-ids for more info.
+    pub fn name_with_id(&self, id: u16) -> Option<String> {
+        if let Some(name) = self.face.names().get(id) {
+            return Some(unicode::decode_utf16(name.name));
         }
-
-        // If the gsub table exists and the user needs it, add all of its glyphs to the glyphs we should load.
-        if settings.load_substitutions {
-            load_gsub(&face, &mut indices_to_load);
-        }
-
-        let units_per_em = face.units_per_em() as f32;
-
-        // New line metrics.
-        let horizontal_line_metrics =
-            Some(LineMetrics::new(face.ascender(), face.descender(), face.line_gap()));
-        let vertical_line_metrics = if let Some(ascender) = face.vertical_ascender() {
-            Some(LineMetrics::new(
-                ascender,
-                face.vertical_descender().unwrap_or(0),
-                face.vertical_line_gap().unwrap_or(0),
-            ))
-        } else {
-            None
-        };
-
-        Ok(Font {
-            name,
-            face,
-            char_to_glyph,
-            units_per_em,
-            horizontal_line_metrics,
-            horizontal_kern,
-            vertical_line_metrics,
-            settings,
-            hash,
-        })
+        None
     }
 
     /// Returns the font's face name if it has one. It is from `Name ID 4` (Full Name) in the name table.
     /// See https://learn.microsoft.com/en-us/typography/opentype/spec/name#name-ids for more info.
-    pub fn name(&self) -> Option<&str> {
-        self.name.as_deref()
+    pub fn name(&self) -> Option<String> {
+        self.name_with_id(4)
     }
 
-    /// Returns all valid unicode codepoints that have mappings to glyph geometry in the font, along
-    /// with their associated index. This does not include grapheme cluster mappings. The mapped
-    /// NonZeroU16 index can be used in the _indexed font functions.
-    pub fn chars(&self) -> &HashMap<char, NonZeroU16> {
-        &self.char_to_glyph
-    }
+    // Returns all valid unicode codepoints that have mappings to glyph geometry in the font, along
+    // with their associated index. This does not include grapheme cluster mappings. The mapped
+    // NonZeroU16 index can be used in the _indexed font functions.
+    // pub fn chars(&self) -> &HashMap<char, NonZeroU16> {
+    //    k
+    //}
 
     /// Returns a precomputed hash for the font file.
     pub fn file_hash(&self) -> usize {
-        self.hash
+        crate::hash::hash(self.face.raw_face().data)
     }
 
     /// New line metrics for fonts that append characters to lines horizontally, and append new
@@ -390,14 +354,14 @@ impl<'a> Font<'a> {
     /// Gets the font's units per em.
     #[inline(always)]
     pub fn units_per_em(&self) -> f32 {
-        self.units_per_em
+        self.face.units_per_em() as f32
     }
 
     /// Calculates the glyph's outline scale factor for a given px size. The units of the scale are
     /// pixels per Em unit.
     #[inline(always)]
     pub fn scale_factor(&self, px: f32) -> f32 {
-        px / self.units_per_em
+        px / self.units_per_em()
     }
 
     /// Retrieves the horizontal scaled kerning value for two adjacent characters.
@@ -430,10 +394,8 @@ impl<'a> Font<'a> {
     #[inline(always)]
     pub fn horizontal_kern_indexed(&self, left: u16, right: u16, px: f32) -> Option<f32> {
         let scale = self.scale_factor(px);
-        let map = self.horizontal_kern.as_ref()?;
-        let key = u32::from(left) << 16 | u32::from(right);
-        let value = map.get(&key)?;
-        Some((*value as f32) * scale)
+        let value = self.get_kern_value(left, right)?;
+        Some((value as f32) * scale)
     }
 
     /// Retrieves the layout metrics for the given character. If the character isn't present in the
@@ -473,17 +435,17 @@ impl<'a> Font<'a> {
         let bounds = glyph.bounds.scale(scale);
         let mut offset_x = fract(bounds.xmin + offset);
         let mut offset_y = fract(1.0 - fract(bounds.height) - fract(bounds.ymin));
-        if is_negative(offset_x) {
+        if offset_x < 0.0 {
             offset_x += 1.0;
         }
-        if is_negative(offset_y) {
+        if offset_y < 0.0 {
             offset_y += 1.0;
         }
         let metrics = Metrics {
-            xmin: as_i32(floor(bounds.xmin)),
-            ymin: as_i32(floor(bounds.ymin)),
-            width: as_i32(ceil(bounds.width + offset_x)) as usize,
-            height: as_i32(ceil(bounds.height + offset_y)) as usize,
+            xmin: floor(bounds.xmin) as i32,
+            ymin: floor(bounds.ymin) as i32,
+            width: ceil(bounds.width + offset_x) as usize,
+            height: ceil(bounds.height + offset_y) as usize,
             advance_width: scale * glyph.advance_width,
             advance_height: scale * glyph.advance_height,
             bounds,
@@ -590,7 +552,7 @@ impl<'a> Font<'a> {
         let scale = self.scale_factor(px);
         let (metrics, offset_x, offset_y) = self.metrics_raw(scale, glyph, 0.0);
         let mut canvas = Raster::new(metrics.width, metrics.height);
-        canvas.draw(&glyph, scale, scale, offset_x, offset_y);
+        canvas.draw(glyph, scale, scale, offset_x, offset_y);
         (metrics, canvas.get_bitmap())
     }
 
@@ -618,7 +580,7 @@ impl<'a> Font<'a> {
         let scale = self.scale_factor(px);
         let (metrics, offset_x, offset_y) = self.metrics_raw(scale, glyph, 0.0);
         let mut canvas = Raster::new(metrics.width * 3, metrics.height);
-        canvas.draw(&glyph, scale * 3.0, scale, offset_x, offset_y);
+        canvas.draw(glyph, scale * 3.0, scale, offset_x, offset_y);
         (metrics, canvas.get_bitmap())
     }
 
@@ -632,8 +594,7 @@ impl<'a> Font<'a> {
     /// the font then 0 is returned.
     #[inline]
     pub fn lookup_glyph_index(&self, character: char) -> u16 {
-        // This is safe, Option<NonZeroU16> is documented to have the same layout as u16.
-        unsafe { mem::transmute::<Option<NonZeroU16>, u16>(self.char_to_glyph.get(&character).copied()) }
+        self.char_to_glyph_id(character).unwrap_or(0)
     }
 
     /// Gets the total glyphs in the font.

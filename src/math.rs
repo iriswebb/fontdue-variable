@@ -1,7 +1,7 @@
-use crate::platform::{self, abs, atan2, f32x4, sqrt};
 use crate::{Glyph, OutlineBounds};
 use alloc::vec;
 use alloc::vec::*;
+use core::simd::f32x4;
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 struct AABB {
@@ -44,37 +44,6 @@ impl CubeCurve {
         }
     }
 
-    fn scale(&self, scale: f32) -> CubeCurve {
-        CubeCurve {
-            a: self.a.scale(scale),
-            b: self.b.scale(scale),
-            c: self.c.scale(scale),
-            d: self.d.scale(scale),
-        }
-    }
-
-    fn is_flat(&self, threshold: f32) -> bool {
-        let (d1, d2, d3, d4) = f32x4::new(
-            self.a.distance_squared(self.b),
-            self.b.distance_squared(self.c),
-            self.c.distance_squared(self.d),
-            self.a.distance_squared(self.d),
-        )
-        .sqrt()
-        .copied();
-        (d1 + d2 + d3) < threshold * d4
-    }
-
-    fn split(&self) -> (CubeCurve, CubeCurve) {
-        let q0 = self.a.midpoint(self.b);
-        let q1 = self.b.midpoint(self.c);
-        let q2 = self.c.midpoint(self.d);
-        let r0 = q0.midpoint(q1);
-        let r1 = q1.midpoint(q2);
-        let s0 = r0.midpoint(r1);
-        (CubeCurve::new(self.a, q0, r0, s0), CubeCurve::new(s0, r1, q2, self.d))
-    }
-
     /// The point at time t in the curve.
     fn point(&self, t: f32) -> Point {
         let tm = 1.0 - t;
@@ -86,24 +55,6 @@ impl CubeCurve {
         let x = a * self.a.x + b * self.b.x + c * self.c.x + d * self.d.x;
         let y = a * self.a.y + b * self.b.y + c * self.c.y + d * self.d.y;
         Point::new(x, y)
-    }
-
-    /// The slope of the tangent line at time t.
-    fn slope(&self, t: f32) -> (f32, f32) {
-        let tm = 1.0 - t;
-        let a = 3.0 * (tm * tm);
-        let b = 6.0 * tm * t;
-        let c = 3.0 * (t * t);
-
-        let x = a * (self.b.x - self.a.x) + b * (self.c.x - self.b.x) + c * (self.d.x - self.c.x);
-        let y = a * (self.b.y - self.a.y) + b * (self.c.y - self.b.y) + c * (self.d.y - self.c.y);
-        (x, y)
-    }
-
-    /// The angle of the tangent line at time t in rads.
-    fn angle(&self, t: f32) -> f32 {
-        let (x, y) = self.slope(t);
-        abs(atan2(x, y))
     }
 }
 
@@ -123,33 +74,6 @@ impl QuadCurve {
         }
     }
 
-    fn scale(&self, scale: f32) -> QuadCurve {
-        QuadCurve {
-            a: self.a.scale(scale),
-            b: self.b.scale(scale),
-            c: self.c.scale(scale),
-        }
-    }
-
-    fn is_flat(&self, threshold: f32) -> bool {
-        let (d1, d2, d3, _) = f32x4::new(
-            self.a.distance_squared(self.b),
-            self.b.distance_squared(self.c),
-            self.a.distance_squared(self.c),
-            1.0,
-        )
-        .sqrt()
-        .copied();
-        (d1 + d2) < threshold * d3
-    }
-
-    fn split(&self) -> (QuadCurve, QuadCurve) {
-        let q0 = self.a.midpoint(self.b);
-        let q1 = self.b.midpoint(self.c);
-        let r0 = q0.midpoint(q1);
-        (QuadCurve::new(self.a, q0, r0), QuadCurve::new(r0, q1, self.c))
-    }
-
     /// The point at time t in the curve.
     fn point(&self, t: f32) -> Point {
         let tm = 1.0 - t;
@@ -160,23 +84,6 @@ impl QuadCurve {
         let x = a * self.a.x + b * self.b.x + c * self.c.x;
         let y = a * self.a.y + b * self.b.y + c * self.c.y;
         Point::new(x, y)
-    }
-
-    /// The slope of the tangent line at time t.
-    fn slope(&self, t: f32) -> (f32, f32) {
-        let tm = 1.0 - t;
-        let a = 2.0 * tm;
-        let b = 2.0 * t;
-
-        let x = a * (self.b.x - self.a.x) + b * (self.c.x - self.b.x);
-        let y = a * (self.b.y - self.a.y) + b * (self.c.y - self.b.y);
-        (x, y)
-    }
-
-    /// The angle of the tangent line at time t in rads.
-    fn angle(&self, t: f32) -> f32 {
-        let (x, y) = self.slope(t);
-        abs(atan2(x, y))
     }
 }
 
@@ -202,32 +109,6 @@ impl Point {
         Point {
             x,
             y,
-        }
-    }
-
-    pub fn scale(&self, scale: f32) -> Point {
-        Point {
-            x: self.x * scale,
-            y: self.y * scale,
-        }
-    }
-
-    pub fn distance_squared(&self, other: Point) -> f32 {
-        let x = self.x - other.x;
-        let y = self.y - other.y;
-        x * x + y * y
-    }
-
-    pub fn distance(&self, other: Point) -> f32 {
-        let x = self.x - other.x;
-        let y = self.y - other.y;
-        sqrt(x * x + y * y)
-    }
-
-    pub fn midpoint(&self, other: Point) -> Point {
-        Point {
-            x: (self.x + other.x) / 2.0,
-            y: (self.y + other.y) / 2.0,
         }
     }
 }
@@ -282,29 +163,41 @@ impl Line {
         };
         let tdy = 1.0 / dy;
 
+        pub fn new_u32(x0: u32, x1: u32, x2: u32, x3: u32) -> f32x4 {
+            unsafe {
+                
+                f32x4::from_array([
+                    f32::from_bits(x0),
+                    f32::from_bits(x1),
+                    f32::from_bits(x2),
+                    f32::from_bits(x3),
+                ])
+            }
+        }
+
         Line {
-            coords: f32x4::new(start.x, start.y, end.x, end.y),
-            nudge: f32x4::new_u32(x_start_nudge, y_start_nudge, x_end_nudge, y_end_nudge),
-            adjustment: f32x4::new(x_first_adj, y_first_adj, 0.0, 0.0),
-            params: f32x4::new(tdx, tdy, dx, dy),
+            coords: f32x4::from_array([start.x, start.y, end.x, end.y]),
+            nudge: new_u32(x_start_nudge, y_start_nudge, x_end_nudge, y_end_nudge),
+            adjustment: f32x4::from_array([x_first_adj, y_first_adj, 0.0, 0.0]),
+            params: f32x4::from_array([tdx, tdy, dx, dy]),
         }
     }
 
     fn reposition(&mut self, bounds: AABB, reverse: bool) {
-        let (mut x0, mut y0, mut x1, mut y1) = if !reverse {
-            self.coords.copied()
+        let [mut x0, mut y0, mut x1, mut y1] = if !reverse {
+            self.coords.as_array()
         } else {
-            let (x0, y0, x1, y1) = self.coords.copied();
-            (x1, y1, x0, y0)
+            let [x0, y0, x1, y1] = self.coords.as_array();
+            &[*x1, *y1, *x0, *y0]
         };
 
         x0 -= bounds.xmin;
         y0 -= bounds.ymax;
-        y0 = abs(y0);
+        y0 = y0.abs();
 
         x1 -= bounds.xmin;
         y1 -= bounds.ymax;
-        y1 = abs(y1);
+        y1 = y1.abs();
 
         *self = Self::new(Point::new(x0, y0), Point::new(x1, y1));
     }
@@ -364,7 +257,7 @@ impl ttf_parser::OutlineBuilder for Geometry {
             let b = curve.point(bt);
             // This is twice the triangle area
             let area = (b.x - seg.a.x) * (seg.c.y - seg.a.y) - (seg.c.x - seg.a.x) * (b.y - seg.a.y);
-            if platform::abs(area) > self.max_area {
+            if area.abs() > self.max_area {
                 stack.push(Segment::new(seg.a, seg.at, b, bt));
                 stack.push(Segment::new(b, bt, seg.c, seg.ct));
             } else {
@@ -387,7 +280,7 @@ impl ttf_parser::OutlineBuilder for Geometry {
             let b = curve.point(bt);
             // This is twice the triangle area
             let area = (b.x - seg.a.x) * (seg.c.y - seg.a.y) - (seg.c.x - seg.a.x) * (b.y - seg.a.y);
-            if platform::abs(area) > self.max_area {
+            if area.abs() > self.max_area {
                 stack.push(Segment::new(seg.a, seg.at, b, bt));
                 stack.push(Segment::new(b, bt, seg.c, seg.ct));
             } else {

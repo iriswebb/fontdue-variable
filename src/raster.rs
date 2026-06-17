@@ -5,15 +5,32 @@
  */
 
 use crate::math::Line;
-use crate::platform::{abs, as_i32, copysign, f32x4, fract};
 use crate::Glyph;
 use alloc::vec;
 use alloc::vec::*;
+use core::f32::math::*;
+use core::simd::f32x4;
 
 pub struct Raster {
     w: usize,
     h: usize,
     a: Vec<f32>,
+}
+
+#[inline(always)]
+pub fn sub_integer(s: f32x4, other: f32x4) -> f32x4 {
+    // Convert to u32 bits, subtract, convert back
+    f32x4::from([
+        f32::from_bits(s[0].to_bits() - other[0].to_bits()),
+        f32::from_bits(s[1].to_bits() - other[1].to_bits()),
+        f32::from_bits(s[2].to_bits() - other[2].to_bits()),
+        f32::from_bits(s[3].to_bits() - other[3].to_bits()),
+    ])
+}
+
+#[inline(always)]
+pub fn trunc_simd(s: f32x4) -> f32x4 {
+    f32x4::from_array([trunc(s[0]), trunc(s[1]), trunc(s[2]), trunc(s[3])])
 }
 
 impl Raster {
@@ -26,9 +43,9 @@ impl Raster {
     }
 
     pub(crate) fn draw(&mut self, glyph: &Glyph, scale_x: f32, scale_y: f32, offset_x: f32, offset_y: f32) {
-        let params = f32x4::new(1.0 / scale_x, 1.0 / scale_y, scale_x, scale_y);
-        let scale = f32x4::new(scale_x, scale_y, scale_x, scale_y);
-        let offset = f32x4::new(offset_x, offset_y, offset_x, offset_y);
+        let params = f32x4::from_array([1.0 / scale_x, 1.0 / scale_y, scale_x, scale_y]);
+        let scale = f32x4::from_array([scale_x, scale_y, scale_x, scale_y]);
+        let offset = f32x4::from_array([offset_x, offset_y, offset_x, offset_y]);
         for line in &glyph.v_lines {
             self.v_line(line, line.coords * scale + offset);
         }
@@ -54,16 +71,16 @@ impl Raster {
 
     #[inline(always)]
     fn v_line(&mut self, line: &Line, coords: f32x4) {
-        let (x0, y0, _, y1) = coords.copied();
-        let temp = coords.sub_integer(line.nudge).trunc();
-        let (start_x, start_y, end_x, end_y) = temp.copied();
-        let (_, mut target_y, _, _) = (temp + line.adjustment).copied();
-        let sy = copysign(1f32, y1 - y0);
-        let mut y_prev = y0;
-        let mut index = as_i32(start_x + start_y * self.w as f32);
-        let index_y_inc = as_i32(copysign(self.w as f32, sy));
-        let mut dist = as_i32(abs(start_y - end_y));
-        let mid_x = fract(x0);
+        let [x0, y0, _, y1] = coords.as_array();
+        let temp = trunc_simd(sub_integer(coords, line.nudge));
+        let [start_x, start_y, end_x, end_y] = temp.as_array();
+        let [_, mut target_y, _, _] = (temp + line.adjustment).as_array();
+        let sy = 1f32.copysign(y1 - y0);
+        let mut y_prev = *y0;
+        let mut index = (start_x + start_y * self.w as f32) as i32;
+        let index_y_inc = (self.w as f32).copysign(sy) as i32;
+        let mut dist = ((start_y - end_y).abs()) as i32;
+        let mid_x = fract(*x0);
         while dist > 0 {
             dist -= 1;
             self.add(index as usize, y_prev - target_y, mid_x);
@@ -71,28 +88,28 @@ impl Raster {
             y_prev = target_y;
             target_y += sy;
         }
-        self.add(as_i32(end_x + end_y * self.w as f32) as usize, y_prev - y1, mid_x);
+        self.add((end_x + end_y * self.w as f32) as usize, y_prev - y1, mid_x);
     }
 
     #[inline(always)]
     fn m_line(&mut self, line: &Line, coords: f32x4, params: f32x4) {
-        let (x0, y0, x1, y1) = coords.copied();
-        let temp = coords.sub_integer(line.nudge).trunc();
-        let (start_x, start_y, end_x, end_y) = temp.copied();
-        let (tdx, tdy, dx, dy) = params.copied();
-        let (mut target_x, mut target_y, _, _) = (temp + line.adjustment).copied();
-        let sx = copysign(1f32, tdx);
-        let sy = copysign(1f32, tdy);
+        let [x0, y0, x1, y1] = coords.as_array();
+        let temp = trunc_simd(sub_integer(coords, line.nudge));
+        let [start_x, start_y, end_x, end_y] = temp.as_array();
+        let [tdx, tdy, dx, dy] = params.as_array();
+        let [mut target_x, mut target_y, _, _] = (temp + line.adjustment).as_array();
+        let sx = 1f32.copysign(*tdx);
+        let sy = 1f32.copysign(*tdy);
         let mut tmx = tdx * (target_x - x0);
         let mut tmy = tdy * (target_y - y0);
-        let tdx = abs(tdx);
-        let tdy = abs(tdy);
-        let mut x_prev = x0;
-        let mut y_prev = y0;
-        let mut index = as_i32(start_x + start_y * self.w as f32);
-        let index_x_inc = as_i32(sx);
-        let index_y_inc = as_i32(copysign(self.w as f32, sy));
-        let mut dist = as_i32(abs(start_x - end_x) + abs(start_y - end_y));
+        let tdx = tdx.abs();
+        let tdy = tdy.abs();
+        let mut x_prev = *x0;
+        let mut y_prev = *y0;
+        let mut index = (start_x + start_y * self.w as f32) as i32;
+        let index_x_inc = (sx) as i32;
+        let index_y_inc = ((self.w as f32).copysign(sy)) as i32;
+        let mut dist = ((start_x - end_x).abs() + (start_y - end_y).abs()) as i32;
         while dist > 0 {
             dist -= 1;
             let prev_index = index;
@@ -115,11 +132,11 @@ impl Raster {
             x_prev = x_next;
             y_prev = y_next;
         }
-        self.add(as_i32(end_x + end_y * self.w as f32) as usize, y_prev - y1, fract((x_prev + x1) / 2.0));
+        self.add((end_x + end_y * self.w as f32) as usize, y_prev - y1, fract((x_prev + x1) / 2.0));
     }
 
     #[inline(always)]
     pub fn get_bitmap(&self) -> Vec<u8> {
-        crate::platform::get_bitmap(&self.a, self.w * self.h)
+        crate::get_bitmap::get_bitmap(&self.a, self.w * self.h)
     }
 }
