@@ -54,7 +54,6 @@ impl Raster {
         }
     }
 
-    #[inline(always)]
     fn add(&mut self, index: usize, height: f32, mid_x: f32) {
         // This is fast and hip.
         unsafe {
@@ -69,7 +68,6 @@ impl Raster {
         // self.a[index + 1] += m;
     }
 
-    #[inline(always)]
     fn v_line(&mut self, line: &Line, coords: f32x4) {
         let [x0, y0, _, y1] = coords.as_array();
         let temp = trunc_simd(sub_integer(coords, line.nudge));
@@ -91,7 +89,6 @@ impl Raster {
         self.add((end_x + end_y * self.w as f32) as usize, y_prev - y1, mid_x);
     }
 
-    #[inline(always)]
     fn m_line(&mut self, line: &Line, coords: f32x4, params: f32x4) {
         let [x0, y0, x1, y1] = coords.as_array();
         let temp = trunc_simd(sub_integer(coords, line.nudge));
@@ -135,8 +132,16 @@ impl Raster {
         self.add((end_x + end_y * self.w as f32) as usize, y_prev - y1, fract((x_prev + x1) / 2.0));
     }
 
-    #[inline(always)]
     pub fn get_bitmap(&self) -> Vec<u8> {
-        crate::get_bitmap::get_bitmap(&self.a, self.w * self.h)
+        let length = self.w * self.h;
+        let mut height = 0.0;
+        assert!(length <= self.a.len());
+        let mut output = vec![0; length];
+        for i in 0..length {
+            height += self.a[i];
+            // Clamping because as u8 is undefined outside of its range in rustc.
+            output[i] = (height.abs() * 255.9).clamp(0.0, 255.0) as u8;
+        }
+        output
     }
 }

@@ -7,7 +7,6 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::*;
 use core::f32::math::*;
-use core::hash::{Hash, Hasher};
 use ttf_parser::{Face, FaceParsingError, GlyphId};
 
 /// Defines the bounds for a glyph's outline in subpixels. A glyph's outline is always contained in
@@ -159,11 +158,6 @@ pub struct FontSettings {
     /// glyphs rendered larger than this will looks worse but perform slightly better. The units of
     /// the scale are pixels per Em unit.
     pub scale: f32,
-    /// The default is true. If enabled, will load glyphs for substitutions (liagtures, etc.) from
-    /// the gsub table on compatible fonts. Only makes a difference when using indexed operations,
-    /// i.e. `Font::raserize_indexed`, as singular characters do not have enough context to be
-    /// substituted.
-    pub load_substitutions: bool,
     /// The default is None, assuming that the font is not variable. If enabled, this will set the
     /// variation of the font with [`ttf_parser::Face::set_set_variation`] before further rendering.
     ///
@@ -175,6 +169,8 @@ pub struct FontSettings {
     /// Variation { axis: Tag::from_bytes(b"wght"), value: 500.0 };
     /// ```
     pub variation: Vec<ttf_parser::Variation>,
+    /// The size of the cache
+    pub cachesize: Option<usize>,
 }
 
 impl Default for FontSettings {
@@ -182,8 +178,67 @@ impl Default for FontSettings {
         FontSettings {
             collection_index: 0,
             scale: 40.0,
-            load_substitutions: true,
             variation: Vec::new(),
+            cachesize: Some(40),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct GlyphCache {
+    /// Number of times the cache has been indexed
+    age: usize,
+    /// Glyph index, glyph, age of creation
+    cache: Vec<(u16, Glyph, usize)>,
+    cap: usize,
+}
+
+impl GlyphCache {
+    fn new(cap: usize) -> Self {
+        Self {
+            age: 0,
+            cache: Vec::with_capacity(cap),
+            cap
+        }
+    }
+
+    fn try_mut(&mut self, idx: u16) -> Option<Glyph> {
+        self.age += 1;
+        for i in 0..self.cache.len() {
+            if self.cache[i].0 == idx {
+                self.cache[i].2 = self.age;
+                return Some(self.cache[i].1.clone());
+            }
+        }
+
+        None
+    }
+
+    #[allow(dead_code)]
+    fn try_no_mut(&self, idx: u16) -> Option<Glyph> {
+        for i in 0..self.cache.len() {
+            if self.cache[i].0 == idx {
+                return Some(self.cache[i].1.clone());
+            }
+        }
+
+        None
+    }
+
+    fn insert(&mut self, idx: u16, g: Glyph) {
+        if self.cache.len() < self.cap {
+            self.cache.push((idx, g, self.age));
+        } else {
+            let mut oldest_idx = 0;
+            let mut oldest_age = usize::MAX;
+            for i in 0..self.cache.len() {
+                if self.cache[i].2 < oldest_age {
+                    oldest_age = self.cache[i].2;
+                    oldest_idx = i;
+                }
+            }
+
+            self.cache[oldest_idx] = (idx, g, self.age);
         }
     }
 }
@@ -192,15 +247,10 @@ impl Default for FontSettings {
 #[derive(Clone)]
 pub struct Font<'a> {
     pub face: Arc<Face<'a>>,
-    horizontal_line_metrics: Option<LineMetrics>,
     vertical_line_metrics: Option<LineMetrics>,
     scale: f32,
-}
-
-impl<'a> Hash for Font<'a> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.file_hash().hash(state);
-    }
+    cachesize: Option<usize>,
+    cache: GlyphCache,
 }
 
 impl<'a> core::fmt::Debug for Font<'a> {
@@ -223,7 +273,7 @@ fn convert_error(error: FaceParsingError) -> &'static str {
 }
 
 impl<'a> Font<'a> {
-    fn generate_glyph(&self, index: u16) -> Result<Glyph, &'static str> {
+    fn generate_new_glyph(&self, index: u16) -> Result<Glyph, &'static str> {
         if index >= self.face.number_of_glyphs() {
             return Err("Attempted to map a codepoint out of bounds.");
         }
@@ -243,8 +293,17 @@ impl<'a> Font<'a> {
         Ok(glyph)
     }
 
-    fn char_to_glyph_id(&self, codepoint: char) -> Option<u16> {
-        self.face.glyph_index(codepoint).map(|id| id.0)
+    fn get_glyph_mut_cache(&mut self, idx: u16) -> Result<Glyph, &'static str> {
+        if self.cachesize.is_none() {
+            return self.generate_new_glyph(idx);
+        }
+        if let Some(g) = self.cache.try_mut(idx) {
+            Ok(g)
+        } else {
+            let gen = self.generate_new_glyph(idx)?;
+            self.cache.insert(idx, gen.clone());
+            Ok(gen)
+        }
     }
 
     /// Constructs a font from a ttf_parser Face
@@ -252,8 +311,6 @@ impl<'a> Font<'a> {
     /// Note: This ignores variations in the font settings, please set variations with Face::set_variation
     pub fn from_face(face: Arc<Face<'a>>, settings: FontSettings) -> FontResult<Font<'a>> {
         // New line metrics.
-        let horizontal_line_metrics =
-            Some(LineMetrics::new(face.ascender(), face.descender(), face.line_gap()));
         let vertical_line_metrics = face.vertical_ascender().map(|ascender| {
             LineMetrics::new(
                 ascender,
@@ -264,8 +321,9 @@ impl<'a> Font<'a> {
 
         Ok(Font {
             face,
-            horizontal_line_metrics,
             vertical_line_metrics,
+            cache: GlyphCache::new(40),
+            cachesize: settings.cachesize,
             scale: settings.scale,
         })
     }
@@ -315,18 +373,6 @@ impl<'a> Font<'a> {
         self.name_with_id(4)
     }
 
-    // Returns all valid unicode codepoints that have mappings to glyph geometry in the font, along
-    // with their associated index. This does not include grapheme cluster mappings. The mapped
-    // NonZeroU16 index can be used in the _indexed font functions.
-    // pub fn chars(&self) -> &HashMap<char, NonZeroU16> {
-    //    k
-    //}
-
-    /// Returns a precomputed hash for the font file.
-    pub fn file_hash(&self) -> usize {
-        crate::hash::hash(self.face.raw_face().data)
-    }
-
     /// New line metrics for fonts that append characters to lines horizontally, and append new
     /// lines vertically (above or below the current line). Only populated for fonts with the
     /// appropriate metrics, none if it's missing.
@@ -334,9 +380,9 @@ impl<'a> Font<'a> {
     ///
     /// * `px` - The size to scale the line metrics by. The units of the scale are pixels per Em
     /// unit.
-    pub fn horizontal_line_metrics(&self, px: f32) -> Option<LineMetrics> {
-        let metrics = self.horizontal_line_metrics?;
-        Some(metrics.scale(self.scale_factor(px)))
+    pub fn horizontal_line_metrics(&self, px: f32) -> LineMetrics {
+        let metrics = LineMetrics::new(self.face.ascender(), self.face.descender(), self.face.line_gap());
+        metrics.scale(self.scale_factor(px))
     }
 
     /// New line metrics for fonts that append characters to lines vertically, and append new
@@ -409,7 +455,7 @@ impl<'a> Font<'a> {
     ///
     /// * `Metrics` - Sizing and positioning metadata for the glyph.
     #[inline]
-    pub fn metrics(&self, character: char, px: f32) -> Metrics {
+    pub fn metrics(&mut self, character: char, px: f32) -> Metrics {
         self.metrics_indexed(self.lookup_glyph_index(character), px)
     }
 
@@ -423,8 +469,8 @@ impl<'a> Font<'a> {
     /// # Returns
     ///
     /// * `Metrics` - Sizing and positioning metadata for the glyph.
-    pub fn metrics_indexed(&self, index: u16, px: f32) -> Metrics {
-        let glyph = self.generate_glyph(index).expect("Invalid Index");
+    pub fn metrics_indexed(&mut self, index: u16, px: f32) -> Metrics {
+        let glyph = self.get_glyph_mut_cache(index).expect("Invalid Index");
         let scale = self.scale_factor(px);
         let (metrics, _, _) = self.metrics_raw(scale, &glyph, 0.0);
         metrics
@@ -466,7 +512,7 @@ impl<'a> Font<'a> {
     /// 0% coverage of that pixel by the glyph and 255 represents 100% coverage. The vec starts at
     /// the top left corner of the glyph.
     #[inline]
-    pub fn rasterize_config(&self, config: GlyphRasterConfig) -> (Metrics, Vec<u8>) {
+    pub fn rasterize_config(&mut self, config: GlyphRasterConfig) -> (Metrics, Vec<u8>) {
         self.rasterize_indexed(config.glyph_index, config.px)
     }
 
@@ -485,7 +531,7 @@ impl<'a> Font<'a> {
     /// 0% coverage of that pixel by the glyph and 255 represents 100% coverage. The vec starts at
     /// the top left corner of the glyph.
     #[inline]
-    pub fn rasterize(&self, character: char, px: f32) -> (Metrics, Vec<u8>) {
+    pub fn rasterize(&mut self, character: char, px: f32) -> (Metrics, Vec<u8>) {
         self.rasterize_indexed(self.lookup_glyph_index(character), px)
     }
 
@@ -505,7 +551,7 @@ impl<'a> Font<'a> {
     /// represents 0% coverage of that subpixel by the glyph and 255 represents 100% coverage. The
     /// vec starts at the top left corner of the glyph.
     #[inline]
-    pub fn rasterize_config_subpixel(&self, config: GlyphRasterConfig) -> (Metrics, Vec<u8>) {
+    pub fn rasterize_config_subpixel(&mut self, config: GlyphRasterConfig) -> (Metrics, Vec<u8>) {
         self.rasterize_indexed_subpixel(config.glyph_index, config.px)
     }
 
@@ -527,7 +573,7 @@ impl<'a> Font<'a> {
     /// represents 0% coverage of that subpixel by the glyph and 255 represents 100% coverage. The
     /// vec starts at the top left corner of the glyph.
     #[inline]
-    pub fn rasterize_subpixel(&self, character: char, px: f32) -> (Metrics, Vec<u8>) {
+    pub fn rasterize_subpixel(&mut self, character: char, px: f32) -> (Metrics, Vec<u8>) {
         self.rasterize_indexed_subpixel(self.lookup_glyph_index(character), px)
     }
 
@@ -544,11 +590,11 @@ impl<'a> Font<'a> {
     /// * `Vec<u8>` - Coverage vector for the glyph. Coverage is a linear scale where 0 represents
     /// 0% coverage of that pixel by the glyph and 255 represents 100% coverage. The vec starts at
     /// the top left corner of the glyph.
-    pub fn rasterize_indexed(&self, index: u16, px: f32) -> (Metrics, Vec<u8>) {
+    pub fn rasterize_indexed(&mut self, index: u16, px: f32) -> (Metrics, Vec<u8>) {
         if px <= 0.0 {
             return (Metrics::default(), Vec::new());
         }
-        let glyph = &self.generate_glyph(index).expect("Invalid Index");
+        let glyph = &self.get_glyph_mut_cache(index).expect("Invalid Index");
         let scale = self.scale_factor(px);
         let (metrics, offset_x, offset_y) = self.metrics_raw(scale, glyph, 0.0);
         let mut canvas = Raster::new(metrics.width, metrics.height);
@@ -572,11 +618,11 @@ impl<'a> Font<'a> {
     /// * `Vec<u8>` - Swizzled RGB coverage vector for the glyph. Coverage is a linear scale where 0
     /// represents 0% coverage of that subpixel by the glyph and 255 represents 100% coverage. The
     /// vec starts at the top left corner of the glyph.
-    pub fn rasterize_indexed_subpixel(&self, index: u16, px: f32) -> (Metrics, Vec<u8>) {
+    pub fn rasterize_indexed_subpixel(&mut self, index: u16, px: f32) -> (Metrics, Vec<u8>) {
         if px <= 0.0 {
             return (Metrics::default(), Vec::new());
         }
-        let glyph = &self.generate_glyph(index).expect("Invalid Index");
+        let glyph = &self.get_glyph_mut_cache(index).expect("Invalid Index");
         let scale = self.scale_factor(px);
         let (metrics, offset_x, offset_y) = self.metrics_raw(scale, glyph, 0.0);
         let mut canvas = Raster::new(metrics.width * 3, metrics.height);
@@ -594,11 +640,6 @@ impl<'a> Font<'a> {
     /// the font then 0 is returned.
     #[inline]
     pub fn lookup_glyph_index(&self, character: char) -> u16 {
-        self.char_to_glyph_id(character).unwrap_or(0)
-    }
-
-    /// Gets the total glyphs in the font.
-    pub fn glyph_count(&self) -> u16 {
-        self.face.number_of_glyphs()
+        self.face.glyph_index(character).map(|id| id.0).unwrap_or(0)
     }
 }

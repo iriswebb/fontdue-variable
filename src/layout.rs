@@ -4,7 +4,7 @@ use crate::unicode::{read_utf8, LinebreakData, Linebreaker, LINEBREAK_NONE};
 use crate::Font;
 use crate::Metrics;
 use alloc::vec::*;
-use core::borrow::Borrow;
+use core::borrow::BorrowMut;
 use core::f32::math::*;
 use core::hash::{Hash, Hasher};
 
@@ -102,27 +102,18 @@ impl Default for LayoutSettings {
 
 /// Configuration for rasterizing a glyph. This struct is also a hashable key that can be used to
 /// uniquely identify a rasterized glyph for applications that want to cache glyphs.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct GlyphRasterConfig {
     /// The glyph index represented by the glyph being positioned.
     pub glyph_index: u16,
     /// The scale of the glyph being positioned in px.
     pub px: f32,
-    /// The hash of the font used in layout to raster the glyph.
-    pub font_hash: usize,
 }
 
 impl Hash for GlyphRasterConfig {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.glyph_index.hash(state);
         self.px.to_bits().hash(state);
-        self.font_hash.hash(state);
-    }
-}
-
-impl PartialEq for GlyphRasterConfig {
-    fn eq(&self, other: &Self) -> bool {
-        self.glyph_index == other.glyph_index && self.px == other.px && self.font_hash == other.font_hash
     }
 }
 
@@ -415,32 +406,31 @@ impl<'a, U: Copy + Clone> Layout<U> {
     /// Characters from the input string can only be omitted from the output, they are never
     /// reordered. The output buffer will always contain characters in the order they were defined
     /// in the styles.
-    pub fn append<T: Borrow<Font<'a>>>(&mut self, fonts: &[T], style: &TextStyle<U>) {
+    pub fn append<T: BorrowMut<Font<'a>>>(&mut self, fonts: &mut [T], style: &TextStyle<U>) {
         // The first layout pass requires some text.
         if style.text.is_empty() {
             return;
         }
 
-        let font: &Font = fonts[style.font_index].borrow();
+        let font = fonts[style.font_index].borrow_mut();
 
-        if let Some(metrics) = font.horizontal_line_metrics(style.px) {
-            self.current_ascent = ceil(metrics.ascent);
-            self.current_new_line = ceil(metrics.new_line_size);
-            self.current_descent = ceil(metrics.descent);
-            self.current_line_gap = ceil(metrics.line_gap);
-            if let Some(line) = self.line_metrics.last_mut() {
-                if self.current_ascent > line.max_ascent {
-                    line.max_ascent = self.current_ascent;
-                }
-                if self.current_descent < line.min_descent {
-                    line.min_descent = self.current_descent;
-                }
-                if self.current_line_gap > line.max_line_gap {
-                    line.max_line_gap = self.current_line_gap;
-                }
-                if self.current_new_line > line.max_new_line_size {
-                    line.max_new_line_size = self.current_new_line;
-                }
+        let metrics = font.horizontal_line_metrics(style.px);
+        self.current_ascent = ceil(metrics.ascent);
+        self.current_new_line = ceil(metrics.new_line_size);
+        self.current_descent = ceil(metrics.descent);
+        self.current_line_gap = ceil(metrics.line_gap);
+        if let Some(line) = self.line_metrics.last_mut() {
+            if self.current_ascent > line.max_ascent {
+                line.max_ascent = self.current_ascent;
+            }
+            if self.current_descent < line.min_descent {
+                line.min_descent = self.current_descent;
+            }
+            if self.current_line_gap > line.max_line_gap {
+                line.max_line_gap = self.current_line_gap;
+            }
+            if self.current_new_line > line.max_new_line_size {
+                line.max_new_line_size = self.current_new_line;
             }
         }
 
@@ -498,7 +488,6 @@ impl<'a, U: Copy + Clone> Layout<U> {
                 key: GlyphRasterConfig {
                     glyph_index,
                     px: style.px,
-                    font_hash: font.file_hash(),
                 },
                 font_index: style.font_index,
                 parent: character,

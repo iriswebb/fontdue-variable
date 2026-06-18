@@ -85,7 +85,7 @@ fn setup_fontdue(group: &mut BenchmarkGroup<WallTime>, font_label: &str, font: &
         scale: size,
         ..FontSettings::default()
     };
-    let font = Font::from_bytes(font, settings).unwrap();
+    let mut font = Font::from_bytes(font, settings).unwrap();
     let parameter = format!("fontdue {} {}px", font_label, size);
     group.bench_function(BenchmarkId::from_parameter(parameter), |b| {
         b.iter(|| {

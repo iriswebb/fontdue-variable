@@ -28,7 +28,7 @@ fn setup_rusttype(group: &mut BenchmarkGroup<WallTime>, font_label: &str, font: 
     let parameter = format!("rusttype {}", font_label);
     group.bench_function(BenchmarkId::from_parameter(parameter), |b| {
         b.iter(|| {
-            let font = Font::try_from_bytes(font).unwrap();
+            let mut font = Font::try_from_bytes(font).unwrap();
             let glyph =
                 font.glyph(CHARACTER).scaled(Scale::uniform(SIZE)).positioned(rusttype::point(0.0, 0.0));
             let (height, width) = if let Some(rect) = glyph.pixel_bounding_box() {
@@ -80,7 +80,7 @@ fn setup_fontdue(group: &mut BenchmarkGroup<WallTime>, font_label: &str, font: &
                 scale: SIZE,
                 ..FontSettings::default()
             };
-            let font = Font::from_bytes(font, settings).unwrap();
+            let mut font = Font::from_bytes(font, settings).unwrap();
             let (_, bitmap) = font.rasterize(CHARACTER, SIZE);
             bitmap
         })

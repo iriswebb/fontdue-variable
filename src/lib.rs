@@ -9,8 +9,6 @@
 extern crate alloc;
 
 mod font;
-mod get_bitmap;
-mod hash;
 /// Tools for laying out strings of text.
 pub mod layout;
 mod math;

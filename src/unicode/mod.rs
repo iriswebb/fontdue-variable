@@ -161,20 +161,18 @@ impl CharacterData {
         if index == 0 {
             class |= CharacterData::MISSING;
         }
-        match c {
-            '\t' | '\n' | '\x0C' | '\r' | ' ' => class |= CharacterData::WHITESPACE,
-            _ => {}
+        if c.is_whitespace() {
+            class |= CharacterData::WHITESPACE;
         }
-        match c {
-            '\0'..='\x1F' | '\x7F' => class |= CharacterData::CONTROL,
-            _ => {}
+        if c.is_control() {
+            class |= CharacterData::CONTROL;
         }
         CharacterData {
             bits: class,
         }
     }
 
-    /// A heuristic for if the glpyh this was classified from should be rasterized. Missing glyphs,
+    /// A heuristic for if the glyph this was classified from should be rasterized. Missing glyphs,
     /// whitespace, and control characters will return false.
     pub fn rasterize(&self) -> bool {
         self.bits == 0
