@@ -5,6 +5,7 @@ use crate::Font;
 use crate::Metrics;
 use alloc::vec::*;
 use core::borrow::BorrowMut;
+use core::borrow::Borrow;
 use core::f32::math::*;
 use core::hash::{Hash, Hasher};
 
@@ -443,6 +444,110 @@ impl<'a, U: Copy + Clone> Layout<U> {
             let char_data = CharacterData::classify(character, glyph_index);
             let metrics = if !char_data.is_control() {
                 font.metrics_indexed(glyph_index, style.px)
+            } else {
+                Metrics::default()
+            };
+            let advance = ceil(metrics.advance_width);
+
+            if linebreak >= self.linebreak_prev {
+                self.linebreak_prev = linebreak;
+                self.linebreak_pos = self.current_pos;
+                self.linebreak_idx = self.glyphs.len().saturating_sub(1); // Mark the previous glyph
+            }
+
+            // Perform a linebreak
+            if linebreak.is_hard() || (self.current_pos - self.start_pos + advance > self.max_width) {
+                self.linebreak_prev = LINEBREAK_NONE;
+                let mut next_glyph_start = self.glyphs().len();
+                if let Some(line) = self.line_metrics.last_mut() {
+                    line.glyph_end = self.linebreak_idx;
+                    line.padding = self.max_width - (self.linebreak_pos - self.start_pos);
+                    self.height += line.max_new_line_size * self.line_height;
+                    next_glyph_start = self.linebreak_idx + 1;
+                }
+                self.line_metrics.push(LinePosition {
+                    baseline_y: 0.0,
+                    padding: 0.0,
+                    max_ascent: self.current_ascent,
+                    min_descent: self.current_descent,
+                    max_line_gap: self.current_line_gap,
+                    max_new_line_size: self.current_new_line,
+                    glyph_start: next_glyph_start,
+                    glyph_end: 0,
+                    tracking_x: self.linebreak_pos,
+                });
+                self.start_pos = self.linebreak_pos;
+            }
+
+            let y = if self.flip {
+                floor(-metrics.bounds.height - metrics.bounds.ymin) // PositiveYDown
+            } else {
+                floor(metrics.bounds.ymin) // PositiveYUp
+            };
+
+            self.glyphs.push(GlyphPosition {
+                key: GlyphRasterConfig {
+                    glyph_index,
+                    px: style.px,
+                },
+                font_index: style.font_index,
+                parent: character,
+                byte_offset: prev_byte_offset,
+                x: floor(self.current_pos + metrics.bounds.xmin),
+                y,
+                width: metrics.width,
+                height: metrics.height,
+                char_data,
+                user_data: style.user_data,
+            });
+            self.current_pos += advance;
+        }
+
+        if let Some(line) = self.line_metrics.last_mut() {
+            line.padding = self.max_width - (self.current_pos - self.start_pos);
+            line.glyph_end = self.glyphs.len().saturating_sub(1);
+        }
+
+        self.finalize();
+    }
+
+    pub fn append_uncached<T: Borrow<Font<'a>>>(&mut self, fonts: &[T], style: &TextStyle<U>) {
+        // The first layout pass requires some text.
+        if style.text.is_empty() {
+            return;
+        }
+
+        let font = fonts[style.font_index].borrow();
+
+        let metrics = font.horizontal_line_metrics(style.px);
+        self.current_ascent = ceil(metrics.ascent);
+        self.current_new_line = ceil(metrics.new_line_size);
+        self.current_descent = ceil(metrics.descent);
+        self.current_line_gap = ceil(metrics.line_gap);
+        if let Some(line) = self.line_metrics.last_mut() {
+            if self.current_ascent > line.max_ascent {
+                line.max_ascent = self.current_ascent;
+            }
+            if self.current_descent < line.min_descent {
+                line.min_descent = self.current_descent;
+            }
+            if self.current_line_gap > line.max_line_gap {
+                line.max_line_gap = self.current_line_gap;
+            }
+            if self.current_new_line > line.max_new_line_size {
+                line.max_new_line_size = self.current_new_line;
+            }
+        }
+
+        let mut byte_offset = 0;
+        while byte_offset < style.text.len() {
+            let prev_byte_offset = byte_offset;
+            let character = read_utf8(style.text.as_bytes(), &mut byte_offset);
+            let linebreak = self.linebreaker.next(character).mask(self.wrap_mask);
+            let glyph_index = font.lookup_glyph_index(character);
+            let char_data = CharacterData::classify(character, glyph_index);
+            let metrics = if !char_data.is_control() {
+                font.metrics_indexed_uncached(glyph_index, style.px)
             } else {
                 Metrics::default()
             };

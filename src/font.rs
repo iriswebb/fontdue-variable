@@ -459,6 +459,11 @@ impl<'a> Font<'a> {
         self.metrics_indexed(self.lookup_glyph_index(character), px)
     }
 
+    #[inline]
+    pub fn metrics_uncached(&self, character: char, px: f32) -> Metrics {
+        self.metrics_indexed_uncached(self.lookup_glyph_index(character), px)
+    }
+
     /// Retrieves the layout metrics at the given index. You normally want to be using
     /// metrics(char, f32) instead, unless your glyphs are pre-indexed.
     /// # Arguments
@@ -471,6 +476,13 @@ impl<'a> Font<'a> {
     /// * `Metrics` - Sizing and positioning metadata for the glyph.
     pub fn metrics_indexed(&mut self, index: u16, px: f32) -> Metrics {
         let glyph = self.get_glyph_mut_cache(index).expect("Invalid Index");
+        let scale = self.scale_factor(px);
+        let (metrics, _, _) = self.metrics_raw(scale, &glyph, 0.0);
+        metrics
+    }
+
+    pub fn metrics_indexed_uncached(&self, index: u16, px: f32) -> Metrics {
+        let glyph = self.generate_new_glyph(index).expect("Invalid Index");
         let scale = self.scale_factor(px);
         let (metrics, _, _) = self.metrics_raw(scale, &glyph, 0.0);
         metrics
@@ -516,6 +528,11 @@ impl<'a> Font<'a> {
         self.rasterize_indexed(config.glyph_index, config.px)
     }
 
+    #[inline]
+    pub fn rasterize_config_uncached(&self, config: GlyphRasterConfig) -> (Metrics, Vec<u8>) {
+        self.rasterize_indexed_uncached(config.glyph_index, config.px)
+    }
+
     /// Retrieves the layout metrics and rasterized bitmap for the given character. If the
     /// character isn't present in the font, then the layout and bitmap for the font's default
     /// character is returned instead.
@@ -533,6 +550,11 @@ impl<'a> Font<'a> {
     #[inline]
     pub fn rasterize(&mut self, character: char, px: f32) -> (Metrics, Vec<u8>) {
         self.rasterize_indexed(self.lookup_glyph_index(character), px)
+    }
+
+    #[inline]
+    pub fn rasterize_uncached(&self, character: char, px: f32) -> (Metrics, Vec<u8>) {
+        self.rasterize_indexed_uncached(self.lookup_glyph_index(character), px)
     }
 
     /// Retrieves the layout rasterized bitmap for the given raster config. If the raster config's
@@ -553,6 +575,11 @@ impl<'a> Font<'a> {
     #[inline]
     pub fn rasterize_config_subpixel(&mut self, config: GlyphRasterConfig) -> (Metrics, Vec<u8>) {
         self.rasterize_indexed_subpixel(config.glyph_index, config.px)
+    }
+
+    #[inline]
+    pub fn rasterize_config_subpixel_uncached(&self, config: GlyphRasterConfig) -> (Metrics, Vec<u8>) {
+        self.rasterize_indexed_subpixel_uncached(config.glyph_index, config.px)
     }
 
     /// Retrieves the layout metrics and rasterized bitmap for the given character. If the
@@ -577,6 +604,11 @@ impl<'a> Font<'a> {
         self.rasterize_indexed_subpixel(self.lookup_glyph_index(character), px)
     }
 
+    #[inline]
+    pub fn rasterize_subpixel_uncached(&self, character: char, px: f32) -> (Metrics, Vec<u8>) {
+        self.rasterize_indexed_subpixel_uncached(self.lookup_glyph_index(character), px)
+    }
+
     /// Retrieves the layout metrics and rasterized bitmap at the given index. You normally want to
     /// be using rasterize(char, f32) instead, unless your glyphs are pre-indexed.
     /// # Arguments
@@ -595,6 +627,18 @@ impl<'a> Font<'a> {
             return (Metrics::default(), Vec::new());
         }
         let glyph = &self.get_glyph_mut_cache(index).expect("Invalid Index");
+        let scale = self.scale_factor(px);
+        let (metrics, offset_x, offset_y) = self.metrics_raw(scale, glyph, 0.0);
+        let mut canvas = Raster::new(metrics.width, metrics.height);
+        canvas.draw(glyph, scale, scale, offset_x, offset_y);
+        (metrics, canvas.get_bitmap())
+    }
+
+    pub fn rasterize_indexed_uncached(&self, index: u16, px: f32) -> (Metrics, Vec<u8>) {
+        if px <= 0.0 {
+            return (Metrics::default(), Vec::new());
+        }
+        let glyph = &self.generate_new_glyph(index).expect("Invalid Index");
         let scale = self.scale_factor(px);
         let (metrics, offset_x, offset_y) = self.metrics_raw(scale, glyph, 0.0);
         let mut canvas = Raster::new(metrics.width, metrics.height);
@@ -629,6 +673,19 @@ impl<'a> Font<'a> {
         canvas.draw(glyph, scale * 3.0, scale, offset_x, offset_y);
         (metrics, canvas.get_bitmap())
     }
+
+    pub fn rasterize_indexed_subpixel_uncached(&self, index: u16, px: f32) -> (Metrics, Vec<u8>) {
+        if px <= 0.0 {
+            return (Metrics::default(), Vec::new());
+        }
+        let glyph = &self.generate_new_glyph(index).expect("Invalid Index");
+        let scale = self.scale_factor(px);
+        let (metrics, offset_x, offset_y) = self.metrics_raw(scale, glyph, 0.0);
+        let mut canvas = Raster::new(metrics.width * 3, metrics.height);
+        canvas.draw(glyph, scale * 3.0, scale, offset_x, offset_y);
+        (metrics, canvas.get_bitmap())
+    }
+
 
     /// Checks if the font has a glyph for the given character.
     #[inline]

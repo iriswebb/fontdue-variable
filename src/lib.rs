@@ -5,6 +5,7 @@
 #![cfg_attr(all(not(test)), no_std)]
 #![feature(core_float_math)]
 #![feature(portable_simd)]
+#![warn(missing_docs)]
 
 extern crate alloc;
 
