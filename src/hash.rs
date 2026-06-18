@@ -74,6 +74,10 @@ fn read_u32(buf: &[u8]) -> u32 {
 fn read_u64(buf: &[u8]) -> u64 {
     u64::from_be_bytes(buf[..8].try_into().unwrap())
 }
+#[cfg(target_endian = "little")]
+fn read_u64(buf: &[u8]) -> u64 {
+    u64::from_le_bytes(buf[..8].try_into().unwrap())
+}
 
 #[inline]
 #[cfg(target_pointer_width = "32")]
