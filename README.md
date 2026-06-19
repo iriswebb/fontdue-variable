@@ -20,7 +20,7 @@ Using `eg-femtofont` on `embedded-graphics`:
 ```rust
 // load the font from raw data
 let font = include_bytes!("assets/path_to_font.ttf") as &[u8];
-let font = femtofont::Font::from_bytes_with_weight(font, 600.0, fontdue::FontSettings::default()).unwrap();
+let font = femtofont::Font::from_bytes_with_weight(font, 600.0, femtofont::FontSettings::default()).unwrap();
 
 // Red text anti-aliased as if it were on a blue background
 let style = eg_femtofont::FemtoFontTextStyle::with_aa_color(&font, Rgb888::RED, Rgb888::BLUE, 20);
