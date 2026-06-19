@@ -11,24 +11,24 @@ const PATH: &[u8] = include_bytes!("../resources/fonts/GreatVibes-Regular.otf") 
 
 // cargo run --example simple --release
 pub fn main() {
-    generate_fontdue();
+    generate_femtofont();
 }
 
-pub fn generate_fontdue() {
+pub fn generate_femtofont() {
     // Read the font data.
     let font = PATH;
     // Setup the configuration for how the font will be parsed.
-    let settings = fontdue::FontSettings {
+    let settings = femtofont::FontSettings {
         scale: SIZE,
-        ..fontdue::FontSettings::default()
+        ..femtofont::FontSettings::default()
     };
     // Parse it into the font type.
-    let font = fontdue::Font::from_bytes(font, settings).unwrap();
+    let font = femtofont::Font::from_bytes(font, settings).unwrap();
     // Rasterize and get the layout metrics for the character at a size.
     let (metrics, bitmap) = font.rasterize(CHARACTER, SIZE);
 
     // Output
-    let mut o = File::create("fontdue.pgm").unwrap();
+    let mut o = File::create("femtofont.pgm").unwrap();
     let _ = o.write(format!("P5\n{} {}\n255\n", metrics.width, metrics.height).as_bytes());
     let _ = o.write(&bitmap);
 }

@@ -11,8 +11,8 @@ const FONTS: [(&str, &[u8]); 2] = [
     ("truetype", include_bytes!("../resources/fonts/Exo2-Regular.ttf")),
     ("opentype", include_bytes!("../resources/fonts/Exo2-Regular.otf")),
 ];
-const SIZES: [f32; 6] = [10.0, 20.0, 40.0, 80.0, 160.0, 200.0];
-const FUNCTIONS: [SetupFunction; 4] = [setup_rusttype, setup_ab_glyph, setup_fontdue, setup_freetype];
+const SIZES: [f32; 1] = [200.0];
+const FUNCTIONS: [SetupFunction; 4] = [setup_rusttype, setup_ab_glyph, setup_femtofont, setup_freetype];
 
 fn setup(c: &mut Criterion) {
     let mut group = c.benchmark_group("rasterize");
@@ -79,14 +79,14 @@ fn setup_ab_glyph(group: &mut BenchmarkGroup<WallTime>, font_label: &str, font: 
     });
 }
 
-fn setup_fontdue(group: &mut BenchmarkGroup<WallTime>, font_label: &str, font: &[u8], size: f32) {
-    use fontdue::{Font, FontSettings};
+fn setup_femtofont(group: &mut BenchmarkGroup<WallTime>, font_label: &str, font: &[u8], size: f32) {
+    use femtofont::{Font, FontSettings};
     let settings = FontSettings {
         scale: size,
         ..FontSettings::default()
     };
     let mut font = Font::from_bytes(font, settings).unwrap();
-    let parameter = format!("fontdue {} {}px", font_label, size);
+    let parameter = format!("femtofont {} {}px", font_label, size);
     group.bench_function(BenchmarkId::from_parameter(parameter), |b| {
         b.iter(|| {
             let mut len = 0;

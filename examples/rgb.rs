@@ -11,11 +11,11 @@ const SIZE: f32 = 12.0;
 pub fn main() {
     // Loading and rasterization
     let font = include_bytes!("../resources/fonts/Roboto-Regular.ttf") as &[u8];
-    let settings = fontdue::FontSettings {
+    let settings = femtofont::FontSettings {
         scale: SIZE,
-        ..fontdue::FontSettings::default()
+        ..femtofont::FontSettings::default()
     };
-    let font = fontdue::Font::from_bytes(font, settings).unwrap();
+    let font = femtofont::Font::from_bytes(font, settings).unwrap();
     let (metrics, bitmap) = font.rasterize_subpixel(CHARACTER, SIZE);
 
     // Output

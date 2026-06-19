@@ -6,11 +6,11 @@ const SIZE: f32 = 20.0;
 // cargo run --example raster-print --release
 pub fn main() {
     let font = include_bytes!("../resources/fonts/Roboto-Regular.ttf") as &[u8];
-    let settings = fontdue::FontSettings {
+    let settings = femtofont::FontSettings {
         scale: SIZE,
-        ..fontdue::FontSettings::default()
+        ..femtofont::FontSettings::default()
     };
-    let font = fontdue::Font::from_bytes(font, settings).unwrap();
+    let font = femtofont::Font::from_bytes(font, settings).unwrap();
 
     println!("Normal:");
     print_normal(&font);
@@ -18,7 +18,7 @@ pub fn main() {
     print_subpixel(&font);
 }
 
-pub fn print_normal(font: &fontdue::Font) {
+pub fn print_normal(font: &femtofont::Font) {
     let (metrics, bitmap) = font.rasterize(CHARACTER, SIZE);
     for y in 0..metrics.height {
         for x in 0..metrics.width {
@@ -29,7 +29,7 @@ pub fn print_normal(font: &fontdue::Font) {
     }
 }
 
-pub fn print_subpixel(font: &fontdue::Font) {
+pub fn print_subpixel(font: &femtofont::Font) {
     let (metrics, bitmap) = font.rasterize_subpixel(CHARACTER, SIZE);
     for y in 0..metrics.height {
         for x in (0..metrics.width * 3).step_by(3) {

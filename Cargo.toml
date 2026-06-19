@@ -1,11 +1,11 @@
 [package]
-name = "fontdue"
-version = "0.9.3"
-authors = ["Joe Cumbo <mooman219@gmail.com>"]
+name = "femtofont"
+version = "0.5.0"
+authors = ["Iris Webb <oliverwebb8192@gmail.com>", "Joe Cumbo <mooman219@gmail.com>"]
 license = "MIT OR Apache-2.0 OR Zlib"
-documentation = "https://docs.rs/fontdue"
-homepage = "https://github.com/mooman219/fontdue"
-repository = "https://github.com/mooman219/fontdue"
+documentation = "https://docs.rs/femtofont"
+homepage = "https://github.com/iriswebb/femtofont"
+repository = "https://github.com/iriswebb/femtofont"
 description = "A simple no_std font parser and rasterizer."
 keywords = ["font", "text", "truetype", "opentype", "ttf"]
 categories = ["no-std", "gui"]
@@ -13,17 +13,28 @@ readme = "README.md"
 edition = "2021"
 exclude = ["dev/**"]
 
-[badges]
-maintenance = { status = "experimental" }
-
-[features]
-# If using no default features, you must enable either hashbrown or std.
-default = ["simd"]
-# Enable this flag to leverage SIMD usage on x86/x86_64 platforms.
-simd = []
-
 [dependencies]
 ttf-parser = { version = "0.25.1", default-features = false, features = [
     "opentype-layout", "no-std-float", "variable-fonts"
 ] }
-rayon = { version = "1.10", optional = true }
+
+[dev-dependencies]
+freetype-rs = { version = "0.26.0" }
+criterion = "0.3"
+rusttype = "0.9.2"
+ab_glyph = "0.2"
+glyph_brush_layout = "0.2.0"
+png = "0.16"
+walkdir = "2.3"
+
+[[bench]]
+name = "rasterize"
+harness = false
+
+[[bench]]
+name = "layout"
+harness = false
+
+[[bench]]
+name = "load"
+harness = false

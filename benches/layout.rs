@@ -2,17 +2,17 @@
 extern crate criterion;
 
 use criterion::{BenchmarkId, Criterion};
-use fontdue::layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle};
+use femtofont::layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle};
 use glyph_brush_layout::{ab_glyph::*, *};
 
 const MESSAGES: [&str; 3] = ["Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore ", "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Tempor orci eu lobortis elementum nibh tellus. Mi tempus imperdiet nulla malesuada pellentesque elit eget gravida cum. Non nisi est sit amet facilisis magna etiam tempor. In fermentum et sollicitudin ac. Nunc consequat interdum varius sit amet mattis. Est velit egestas dui id ornare arcu odio ut. Venenatis lectus magna fringilla urna porttitor rhoncus dolor purus non. Lobor", "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Feugiat nibh sed pulvinar proin gravida hendrerit. Duis ut diam quam nulla porttitor massa id neque. Lacus viverra vitae congue eu consequat ac felis. Etiam non quam lacus suspendisse faucibus. Eget mauris pharetra et ultrices neque ornare. Libero id faucibus nisl tincidunt eget nullam non. Justo laoreet sit amet cursus sit amet. Velit laoreet id donec ultrices tincidunt arcu non sodales neque.
 
 Aliquet nibh praesent tristique magna sit. Purus viverra accumsan in nisl nisi scelerisque. Tortor vitae purus faucibus ornare suspendisse sed nisi. Dolor sit amet consectetur adipiscing elit pellentesque habitant. Egestas purus viverra accumsan in nisl. Amet venenatis urna cursus eget nunc scelerisque. Dictumst quisque sagittis purus sit amet volutpat. Vel risus commodo viverra maecenas. Imperdiet nulla malesuada pellentesque elit eget gravida cum sociis natoque. Nibh ips"];
 
-fn fontdue_layout_benchmark(c: &mut Criterion) {
+fn femtofont_layout_benchmark(c: &mut Criterion) {
     // Loading
     let mut font = include_bytes!("../resources/fonts/Roboto-Regular.ttf") as &[u8];
-    let mut roboto_regular = fontdue::Font::from_bytes(font, fontdue::FontSettings::default()).unwrap();
+    let mut roboto_regular = femtofont::Font::from_bytes(font, femtofont::FontSettings::default()).unwrap();
     let mut layout = Layout::new(CoordinateSystem::PositiveYUp);
     layout.reset(&LayoutSettings {
         max_width: Some(200.0),
@@ -20,7 +20,7 @@ fn fontdue_layout_benchmark(c: &mut Criterion) {
     });
     let mut fonts = &mut [roboto_regular];
 
-    let mut group = c.benchmark_group("layout/fontdue");
+    let mut group = c.benchmark_group("layout/femtofont");
     group.measurement_time(core::time::Duration::from_secs(4));
     group.sample_size(250);
     for message in MESSAGES.iter() {
@@ -66,5 +66,5 @@ fn glyph_brush_layout_benchmark(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, fontdue_layout_benchmark, glyph_brush_layout_benchmark);
+criterion_group!(benches, femtofont_layout_benchmark, glyph_brush_layout_benchmark);
 criterion_main!(benches);

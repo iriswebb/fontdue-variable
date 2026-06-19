@@ -1,4 +1,4 @@
-use fontdue::{Font, FontSettings};
+use femtofont::{Font, FontSettings};
 use std::{convert::TryInto, fs, io::Cursor, path::Path};
 use walkdir::WalkDir;
 
@@ -121,7 +121,7 @@ fn baseline_all() {
     for (index, bytes) in (&FONTS).iter().enumerate() {
         let name = FONT_NAMES[index];
         let font = Font::from_bytes(*bytes, FontSettings::default()).unwrap();
-        for g in 0..font.glyph_count() {
+        for g in 0..font.face.number_of_glyphs() {
             for size in &SIZES {
                 record_local_baseline(&font, name, g, *size);
             }

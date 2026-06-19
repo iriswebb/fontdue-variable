@@ -1,4 +1,4 @@
-use fontdue::{Font, FontSettings};
+use femtofont::{Font, FontSettings};
 
 use crate::modules::FONTS;
 const SIZES: [f32; 3] = [1024.0, 8.0, 2.0];
@@ -12,7 +12,7 @@ const CHARACTERS: [char; 94] = [
 
 // Performs some basic asserts on the rasterization output.
 fn check_best_guess_rasterization(
-    (metrics, bitmap): (fontdue::Metrics, Vec<u8>),
+    (metrics, bitmap): (femtofont::Metrics, Vec<u8>),
     rendered_char: char,
     index: u16,
 ) {
@@ -57,7 +57,7 @@ fn render_all_small() {
     for font in &FONTS {
         let font = Font::from_bytes(*font, FontSettings::default()).unwrap();
         println!("Rendering characters for: {:?}", font);
-        for index in 0..font.glyph_count() {
+        for index in 0..font.face.number_of_glyphs() {
             check_best_guess_rasterization(font.rasterize_indexed(index, 8.0), ' ', index);
         }
     }

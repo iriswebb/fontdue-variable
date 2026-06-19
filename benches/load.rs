@@ -9,7 +9,7 @@ type SetupFunction = fn(&mut BenchmarkGroup<WallTime>, &str, &[u8]);
 const CHARACTER: char = 'L';
 const SIZE: f32 = 10.0;
 const FONTS: [(&str, &[u8]); 1] = [("roboto", include_bytes!("../resources/fonts/Roboto-Regular.ttf"))];
-const FUNCTIONS: [SetupFunction; 4] = [setup_rusttype, setup_ab_glyph, setup_fontdue, setup_freetype];
+const FUNCTIONS: [SetupFunction; 4] = [setup_rusttype, setup_ab_glyph, setup_femtofont, setup_freetype];
 
 fn setup(c: &mut Criterion) {
     let mut group = c.benchmark_group("load");
@@ -70,10 +70,10 @@ fn setup_ab_glyph(group: &mut BenchmarkGroup<WallTime>, font_label: &str, font: 
     });
 }
 
-fn setup_fontdue(group: &mut BenchmarkGroup<WallTime>, font_label: &str, font: &[u8]) {
-    use fontdue::{Font, FontSettings};
+fn setup_femtofont(group: &mut BenchmarkGroup<WallTime>, font_label: &str, font: &[u8]) {
+    use femtofont::{Font, FontSettings};
 
-    let parameter = format!("fontdue {}", font_label);
+    let parameter = format!("femtofont {}", font_label);
     group.bench_function(BenchmarkId::from_parameter(parameter), |b| {
         b.iter(|| {
             let settings = FontSettings {

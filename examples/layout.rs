@@ -1,14 +1,14 @@
 //! Performs basic text layout in Fontdue.
 
-use fontdue::layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle};
-use fontdue::Font;
+use femtofont::layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle};
+use femtofont::Font;
 
 // cargo run --example layout --release
 pub fn main() {
     // Read the font data.
     let font = include_bytes!("../resources/fonts/Roboto-Regular.ttf") as &[u8];
     // Parse it into the font type.
-    let roboto_regular = Font::from_bytes(font, fontdue::FontSettings::default()).unwrap();
+    let roboto_regular = Font::from_bytes(font, femtofont::FontSettings::default()).unwrap();
     // The list of fonts that will be used during layout.
     let fonts = &[roboto_regular];
     // Create a layout context. Laying out text needs some heap allocations; reusing this context
